@@ -8,11 +8,13 @@
     "start": "electron .",
     "dev": "electron .",
     "pack": "electron-builder --win --x64",
-    "check": "node --check src/main.js && node --check src/preload.js && node --check src/ui.js"
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/ui.js",
+    "benchmark": "node scripts/benchmark.mjs"
   },
   "devDependencies": {
     "electron": "^35.7.5",
-    "electron-builder": "^26.0.12"
+    "electron-builder": "^26.0.12",
+    "playwright-core": "^1.56.0"
   },
   "build": {
     "appId": "app.uniquebrowser.desktop",
