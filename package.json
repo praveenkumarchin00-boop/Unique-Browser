@@ -1,0 +1,39 @@
+{
+  "name": "unique-browser",
+  "version": "0.1.0",
+  "description": "Unique Browser - Windows desktop browser",
+  "main": "src/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "pack": "electron-builder --win --x64",
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/ui.js"
+  },
+  "devDependencies": {
+    "electron": "^35.7.5",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "app.uniquebrowser.desktop",
+    "productName": "Unique Browser",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "artifactName": "Unique-Browser-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
