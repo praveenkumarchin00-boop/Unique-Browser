@@ -1,0 +1,38 @@
+const {app,BrowserWindow,WebContentsView,ipcMain,session,dialog,shell,Menu}=require('electron');
+const fs=require('node:fs');const path=require('node:path');const {performance}=require('node:perf_hooks');
+const home='https://www.google.com/';let win,tabs=[],active=null,seq=0,settings={blockTrackers:true,search:'https://www.google.com/search?q='},bookmarks=[],history=[],downloadItems=[],blocked=0,launch=performance.now(),saveTimer;
+const dataFile=()=>path.join(app.getPath('userData'),'browser-data.json');
+function load(){try{const d=JSON.parse(fs.readFileSync(dataFile(),'utf8'));settings={...settings,...d.settings};bookmarks=d.bookmarks||[];history=d.history||[];return (d.tabs||[]).slice(0,20)}catch{return []}}
+function save(){clearTimeout(saveTimer);saveTimer=setTimeout(()=>{try{fs.writeFileSync(dataFile(),JSON.stringify({settings,bookmarks,history:history.slice(0,500),tabs:tabs.map(t=>t.url||home)}))}catch(e){console.error('save failed',e)}},400)}
+function safeUrl(input){const q=String(input||'').trim();if(!q)return home;if(/^https?:\/\//i.test(q))return q;if(/^about:blank$/i.test(q))return q;if(/^(file|javascript|data|chrome|devtools):/i.test(q))throw Error('Unsupported URL scheme');if(/^(localhost|127\.0\.0\.1)(:\d+)?(\/.*)?$/i.test(q))return 'http://'+q;if(/^[^\s]+\.[^\s]+$/.test(q)&&!q.includes(' '))return 'https://'+q;return settings.search+encodeURIComponent(q)}
+function viewBounds(){const [w,h]=win.getContentSize();return {x:0,y:112,width:Math.max(100,w),height:Math.max(100,h-112)}}
+function state(){if(!win||win.isDestroyed())return;win.webContents.send('browser:state',{tabs:tabs.map(t=>({id:t.id,title:t.title,url:t.url,loading:t.loading,canBack:t.view.webContents.canGoBack(),canForward:t.view.webContents.canGoForward()})),active,bookmarks,history:history.slice(0,60),downloads:downloadItems.slice(0,30),blocked,settings,uptime:Math.round(performance.now()-launch)})}
+function emit(message){win?.webContents.send('browser:event',message)}
+function activate(id){const t=tabs.find(x=>x.id===id);if(!t)return;if(active!==null){const previous=tabs.find(x=>x.id===active);if(previous)win.contentView.removeChildView(previous.view)}active=id;win.contentView.addChildView(t.view);t.view.setBounds(viewBounds());if(!t.loaded){t.loaded=true;t.view.webContents.loadURL(t.url).catch(()=>{})}state();save()}
+function add(url=home,foreground=true,lazy=false){const id=++seq;const view=new WebContentsView({webPreferences:{partition:'persist:unique',sandbox:true,contextIsolation:true,nodeIntegration:false,webSecurity:true}});const t={id,view,url,title:'New tab',loading:false,loaded:false};tabs.push(t);const wc=view.webContents;wc.setWindowOpenHandler(({url})=>{if(/^https?:\/\//.test(url))add(url,true);return {action:'deny'}});wc.on('will-navigate',e=>{if(!/^https?:\/\//.test(e.url)&&e.url!=='about:blank')e.preventDefault()});wc.on('did-start-loading',()=>{t.loading=true;state()});wc.on('did-stop-loading',()=>{t.loading=false;state()});wc.on('page-title-updated',(_e,title)=>{t.title=title;state()});wc.on('did-navigate',(_e,url)=>{t.url=url;record(url,t.title);state();save()});wc.on('did-navigate-in-page',(_e,url)=>{t.url=url;state()});wc.on('render-process-gone',()=>{t.title='Tab crashed — reload';state()});wc.on('page-favicon-updated',()=>state());wc.on('will-download',()=>{});if(foreground)activate(id);else if(!lazy){t.loaded=true;wc.loadURL(url).catch(()=>{})}state();save();return id}
+function record(url,title){if(!/^https?:\/\//.test(url))return;history.unshift({url,title,time:Date.now()});history=history.slice(0,500)}
+function close(id){const i=tabs.findIndex(t=>t.id===id);if(i<0)return;const t=tabs[i];if(active===id){win.contentView.removeChildView(t.view);active=null}tabs.splice(i,1);t.view.webContents.close();if(!tabs.length)add(home);else if(active===null)activate(tabs[Math.min(i,tabs.length-1)].id);state();save()}
+function navigate(id,text){const t=tabs.find(t=>t.id===id);if(!t)return;const url=safeUrl(text);t.url=url;t.loaded=true;t.view.webContents.loadURL(url).catch(e=>emit({type:'error',message:e.message}));state();save()}
+function configure(){const ses=session.fromPartition('persist:unique');const blockedHosts=['doubleclick.net','googlesyndication.com','googleadservices.com','adservice.google.com','google-analytics.com','analytics.google.com','facebook.net','connect.facebook.net','scorecardresearch.com','hotjar.com'];ses.webRequest.onBeforeRequest((details,callback)=>{if(!settings.blockTrackers||details.resourceType==='mainFrame')return callback({});let host;try{host=new URL(details.url).hostname.toLowerCase()}catch{return callback({})}const deny=blockedHosts.some(h=>host===h||host.endsWith('.'+h));if(deny){blocked++;if(blocked%20===0)state()}callback({cancel:deny})});ses.on('will-download',(_e,item)=>{const d={id:Date.now()+Math.random(),name:item.getFilename(),received:0,total:item.getTotalBytes(),state:'progressing'};downloadItems.unshift(d);item.on('updated',()=>{d.received=item.getReceivedBytes();state()});item.once('done',(_e,status)=>{d.state=status;state()});state()});ses.setPermissionRequestHandler((_wc,permission,callback)=>{if(['notifications','geolocation','media','camera','microphone'].includes(permission)){dialog.showMessageBox(win,{type:'question',buttons:['Deny','Allow'],defaultId:0,cancelId:0,message:'Allow website permission: '+permission+'?'}).then(r=>callback(r.response===1));return}callback(false)})}
+app.whenReady().then(()=>{const restored=load();configure();Menu.setApplicationMenu(null);win=new BrowserWindow({width:1280,height:850,minWidth:720,minHeight:500,title:'Unique Browser',backgroundColor:'#0b1220',webPreferences:{preload:path.join(__dirname,'preload.js'),sandbox:true,contextIsolation:true,nodeIntegration:false}});win.loadFile(path.join(__dirname,'index.html'));win.on('resize',()=>{const t=tabs.find(t=>t.id===active);if(t)t.view.setBounds(viewBounds())});win.on('closed',()=>{win=null});win.webContents.once('did-finish-load',()=>{add(restored[0]||home);for(const url of restored.slice(1))add(url,false,true);state()});});
+app.on('window-all-closed',()=>app.quit());
+ipcMain.handle('browser:command',async(_event,cmd,...args)=>{if(!win||_event.sender!==win.webContents)return null;const t=tabs.find(t=>t.id===active);try{switch(cmd){
+case 'state':state();return true;
+case 'new':return add(args[0]||home);
+case 'activate':activate(Number(args[0]));break;
+case 'close':close(Number(args[0]));break;
+case 'navigate':navigate(active,args[0]);break;
+case 'back':if(t?.view.webContents.canGoBack())t.view.webContents.goBack();break;
+case 'forward':if(t?.view.webContents.canGoForward())t.view.webContents.goForward();break;
+case 'reload':t?.view.webContents.reload();break;
+case 'stop':t?.view.webContents.stop();break;
+case 'home':navigate(active,home);break;
+case 'bookmark':if(!t)break;{const i=bookmarks.findIndex(b=>b.url===t.url);if(i>=0)bookmarks.splice(i,1);else bookmarks.unshift({url:t.url,title:t.title});save();state()}break;
+case 'openBookmark':add(args[0]);break;
+case 'settings':if(args[0]==='blockTrackers')settings.blockTrackers=Boolean(args[1]);save();state();break;
+case 'clearHistory':history=[];save();state();break;
+case 'devtools':t?.view.webContents.openDevTools({mode:'detach'});break;
+case 'external':if(/^https:\/\//.test(args[0]))await shell.openExternal(args[0]);break;
+case 'stats':return {tabs:tabs.length,blocked,uptime:Math.round(performance.now()-launch),processes:app.getAppMetrics().map(x=>({type:x.type,memoryMB:Math.round((x.memory?.workingSetSize||0)/1024)}))};
+default:throw Error('Unknown command')
+}return true}catch(e){emit({type:'error',message:e.message});return false}});
