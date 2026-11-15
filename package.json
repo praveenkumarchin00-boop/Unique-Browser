@@ -7,7 +7,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "pack": "electron-builder --win --x64",
+    "pack": "electron-builder --win nsis --x64 --publish never",
     "check": "node --check src/main.js && node --check src/preload.js && node --check src/ui.js",
     "benchmark": "node scripts/benchmark.mjs"
   },
@@ -28,8 +28,7 @@
     ],
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        "nsis"
       ],
       "artifactName": "Unique-Browser-${version}-${arch}.${ext}"
     },
