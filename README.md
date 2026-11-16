@@ -23,7 +23,7 @@ npm install
 npm run check
 npm start
 ```
-To build Windows binaries on Windows: `npm run pack`.
+To build the extract-and-run Windows folder on Windows: `npm run pack` (output: `dist/win-unpacked/`).
 
 ## Keyboard shortcuts
 - Ctrl+L: focus address bar
